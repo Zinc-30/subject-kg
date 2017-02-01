@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import pickle
 import sklearn
+from sklearn.svm import SVC
 from sklearn.preprocessing import StandardScaler
 from libact.base.dataset import Dataset, import_libsvm_sparse
 from libact.models import *
@@ -10,6 +11,8 @@ from libact.labelers import IdealLabeler,InteractiveLabeler
 from libact.base.interfaces import QueryStrategy,ContinuousModel,ProbabilisticModel
 from libact.utils import inherit_docstring_from, zip
 from amt import Amt
+from sklearn.cluster import KMeans
+import time
 
 def pre_data(featurefile,datafile):
 	selected_list = ['id','country','areaLand','foundingDate','areaMetro','areaTotal',\
@@ -99,9 +102,9 @@ def make_query(dataset,model,method):
 	unlabeled_entry_ids, X_pool = zip(*dataset.get_unlabeled_entries())
     
 	if isinstance(model, ContinuousModel):
-		dvalue = model.predict_proba(X_pool)
-	elif isinstance(model, ProbabilisticModel):
 		dvalue = model.predict_real(X_pool)
+	elif isinstance(model, ProbabilisticModel):
+		dvalue = model.predict_proba(X_pool)
 
 	if method == 'lc':  # least confident
 		# ask_id = np.argmin(np.max(dvalue, axis=1))
@@ -112,8 +115,16 @@ def make_query(dataset,model,method):
 	    # Find 2 largest decision values
 			dvalue = -(np.partition(-dvalue, 2, axis=1)[:, :2])
 		margin = np.abs(dvalue[:, 0] - dvalue[:, 1])
+		X,_ = zip(*dataset.data)
+		cluster_data = [X[i] for i in np.argsort(margin)[:100]]
+		label = KMeans(n_clusters=5,random_state=0).fit(cluster_data).labels_
+		lset = set([])
 		# ask_id = np.argmin(margin)
-		ask_ids = np.argsort(margin)[:5]
+		ask_ids = []
+		for i in range(100):
+			if not label[i] in lset:
+				lset.add(label[i])
+				ask_ids.append(np.argsort(margin)[i])
 
 	elif method == 'entropy':
 		entropy = np.sum(-dvalue * np.log(dvalue), axis=1)
@@ -121,58 +132,86 @@ def make_query(dataset,model,method):
 		ask_ids = np.argsort(entropy)[-5:]
 	return [unlabeled_entry_ids[ask_id] for ask_id in ask_ids]
 
-def ask_hit(df,ask_ids,train_ds):
+def ask_hit(df,ask_ids,train_ds,sandboxFlag):
 	city2id = dict(zip(df['name'], range(len(df['name']))))
-	sandboxFlag = True
-	cityamt = Amt(sandboxFlag)
-	
+	amt = Amt(sandboxFlag)
+	for i in ask_ids:
+		train_ds.update(i,-1)
 	if sandboxFlag:
 		f = open('sand_hit_ids','a')
 	else:
 		f = open('hit_ids','a')
-	hit_ids = []
 	namel =  [df['name'][i] for i in ask_ids]
 	countryl =  [df['country'][i] for i in ask_ids]
-	hit_id = cityamt._Create_City_Hit(namel,countryl,'big')
-	hit_ids.append(hit_id['hit_id'])
-	f.write(hit_id['hit_id']+'\n')  # python will convert \n to os.linesep
-	f.close()
-	finish_hits = set([x.HITId for x in cityamt.mtc.get_reviewable_hits()])
+	hit_id = amt._Create_City_Hit(namel,countryl,'big')['hit_id']
+
+	finish_hits = set(amt._GetReviewable_Hits())
 	print finish_hits
-	# while not (hit_id['hit_id'] in finish_hits):
-	# 	finish_hits = set([x.HITId for x in cityamt.mtc.get_reviewable_hits()])
-	for hit_id in hit_ids:
-		[ins_result, attribute_result] = cityamt._Retrive_HIT_Answer(hit_id)
-		for yn in ins_result:
-			if ins_result[yn]>1:
-				train_ds.update(city2id[yn],1)
-			else:
-				train_ds.update(city2id[yn],0)
-			print("Answer:{0},Count:{1}".format(yn,ins_result[yn]))
-		for ar in attribute_result:
-			print("Attribtue:{0},Count:{1}".format(ar,attribute_result[ar]))
+	print hit_id
+	while not (hit_id in finish_hits):
+		time.sleep(10)
+		finish_hits = set(amt._GetReviewable_Hits())
+
+	f.write(hit_id+'$')  # python will convert \n to os.linesep
+	for i in ask_ids:
+		f.write(str(i)+' ')
+	f.write('\n')
+	f.close()
+
+	[ins_result, attribute_result] = amt._Retrive_HIT_Answer(hit_id)
+	for yn in ins_result:
+		if ins_result[yn]>0:
+			train_ds.update(city2id[yn],1)
+		else:
+			train_ds.update(city2id[yn],-1)
+		print("Answer:{0},Count:{1}".format(yn,ins_result[yn]))
+	
+	for ar in attribute_result:
+		print("Attribtue:{0},Count:{1}".format(ar,attribute_result[ar]))
 	return train_ds
 
+def get_labels(df,sandboxFlag):
+	city2id = dict(zip(df['name'], range(len(df['name']))))
+	amt = Amt(sandboxFlag)
+	y = [None]* len(df['name'])
+	if sandboxFlag:
+		f = open('sand_hit_ids','r')
+	else:
+		f = open('hit_ids','r')
+	for line in f:
+		lines = line.split('$')
+		hit_id = lines[0]
+		ask_ids = [int(x) for x in lines[1].strip().split(' ')]
+		for i in ask_ids:
+			y[i] = -1
+		[ins_result, attribute_result] = amt._Retrive_HIT_Answer(hit_id)
+		for yn in ins_result:
+			if ins_result[yn]>0:
+				y[city2id[yn]]=1
+			else:
+				y[city2id[yn]]=-1
+	return y
+
+
+
 def main():
+	sandboxFlag = False
+	quota = 5
 	df,amt_info_df = read_data()
 	X = StandardScaler().fit_transform(df.values)
-	with open('label','rb') as f:
-		label = pickle.load(f)
-	# y_train = [1,1,0,1,1,1,0,0,0,1,1,1,1,0,1]
-	print X.shape[0]
-	print len(label)
-	train_ds = Dataset(X,label)
-	model = LogisticRegression()
-	quota = 1
+	y = get_labels(amt_info_df,sandboxFlag)
+	train_ds = Dataset(X,y)
+	model = SVM()
 	model.train(train_ds)
-	print model.score(train_ds)
+	print 'init score is ',model.score(train_ds)
 	for i in range(quota):
-		ask_ids = make_query(train_ds,model,'lc')
+		ask_ids = make_query(train_ds,model,'sm')
 		print ask_ids
-		train_ds = ask_hit(amt_info_df,ask_ids,train_ds)
+		train_ds = ask_hit(amt_info_df,ask_ids,train_ds,sandboxFlag)
 		model.train(train_ds)
-		print model.score(train_ds)
+		print 'score ',i,'th is ',model.score(train_ds)
 
 
 #pre_data('testInstance_PropertyList.txt','testInstanceFeature1.txt')
-main()
+if __name__ == '__main__':
+	main()

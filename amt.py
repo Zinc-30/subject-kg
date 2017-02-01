@@ -12,23 +12,23 @@ import pickle
 
 ###############################################
 #Test Functions
-class Amt():
-	ACCESS_ID = 'AKIAJUT7UAPF2JZYLK6A'
-	SECRET_KEY = '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'
-	sandbox_HOST = 'mechanicalturk.sandbox.amazonaws.com'
-	real_HOST = 'mechanicalturk.amazonaws.com'
-	real_ID = ['33KTOXRB2LW4PI5DBFZPH8KMJK5FRN','34FHTOY99EQJL9R5QQSQRPJZ03RASC']
-	sandbox_ID = ['3MVRTDU8OEPFKV7FE8HQFIS83UU5FC','38X1F3X9FX9JBPRXU0O22B4V1CUY5X']
-	mtc = MTurkConnection(aws_access_key_id = ACCESS_ID, aws_secret_access_key = SECRET_KEY, host = sandbox_HOST)
-	
-	
+class Amt():	
 	def __init__(self, flag):
+		ACCESS_ID = 'AKIAJUT7UAPF2JZYLK6A'
+		SECRET_KEY = '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'
+		sandbox_HOST = 'mechanicalturk.sandbox.amazonaws.com'
+		real_HOST = 'mechanicalturk.amazonaws.com'
+		real_ID = ['3UY3BQX0VV2WOU92T713DTPA1Q420V','3VCWISQFEMODDFNJ38KFOHLF2LLLLU']
+		sandbox_ID = ['3MVRTDU8OEPFKV7FE8HQFIS83UU5FC','38X1F3X9FX9JBPRXU0O22B4V1CUY5X']
 		if flag:
-			self.hit_type = self.sandbox_ID[0]
-			self.hit_layout = self.sandbox_ID[1]
+			self.hit_type = sandbox_ID[0]
+			self.hit_layout = sandbox_ID[1]
+			self.mtc = MTurkConnection(aws_access_key_id = ACCESS_ID, aws_secret_access_key = SECRET_KEY, host = sandbox_HOST)
+
 		else:
-			self.hit_type = self.real_ID[0]
-			self.hit_layout = self.real_ID[1]
+			self.hit_type = real_ID[0]
+			self.hit_layout = real_ID[1]
+			self.mtc = MTurkConnection(aws_access_key_id = ACCESS_ID, aws_secret_access_key = SECRET_KEY, host = real_HOST)
 
 	def _GET_Balance(self):
 		mtc = self.mtc
@@ -68,7 +68,7 @@ class Amt():
 		response = mtc.create_hit(hit_type=self.hit_type,
 								  hit_layout=self.hit_layout,
 								  layout_params = params,
-								  max_assignments = 3,
+								  max_assignments = 5,
 								  )
 		# The response included several fields that will be helpful later
 		hit_type_id = response[0].HITTypeId
@@ -166,6 +166,16 @@ class Amt():
 				answer.append(hit.HITId)
 		return answer
 
+	def _GetReviewable_Hits(self):
+		mtc = self.mtc
+		hitList = []
+		for i in range(1,100):
+			curList = mtc.get_reviewable_hits(page_number = i)
+			if len(curList) == 0:
+				break
+			for cur in curList:
+				hitList.append(cur.HITId)
+		return hitList
 
 def read_data():
 	selected_list = ['id','name','country']
