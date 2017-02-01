@@ -144,19 +144,19 @@ def ask_hit(df,ask_ids,train_ds,sandboxFlag):
 	namel =  [df['name'][i] for i in ask_ids]
 	countryl =  [df['country'][i] for i in ask_ids]
 	hit_id = amt._Create_City_Hit(namel,countryl,'big')['hit_id']
-
+	
+	f.write(hit_id+'$')  # python will convert \n to os.linesep
+	for i in ask_ids:
+		f.write(str(i)+' ')
+	f.write('\n')
+	f.close()
+	
 	finish_hits = set(amt._GetReviewable_Hits())
 	print finish_hits
 	print hit_id
 	while not (hit_id in finish_hits):
 		time.sleep(10)
 		finish_hits = set(amt._GetReviewable_Hits())
-
-	f.write(hit_id+'$')  # python will convert \n to os.linesep
-	for i in ask_ids:
-		f.write(str(i)+' ')
-	f.write('\n')
-	f.close()
 
 	[ins_result, attribute_result] = amt._Retrive_HIT_Answer(hit_id)
 	for yn in ins_result:
